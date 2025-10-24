@@ -8,3 +8,8 @@ conda activate sorter
 pip install requirements.txt
 ```
 
+Download Intan Dataset
+
+```
+https://data.mendeley.com/datasets/w767nnk5wh/1
+```
