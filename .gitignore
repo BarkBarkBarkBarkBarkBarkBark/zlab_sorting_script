@@ -4,3 +4,5 @@ cambridgeneurotech_openephys_recording
 sa_folder
 sorting_output
 Data/*
+cache_np1_binary
+cache_np1_bigchunks
