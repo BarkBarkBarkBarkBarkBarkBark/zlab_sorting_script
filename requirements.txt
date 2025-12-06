@@ -5,3 +5,5 @@ gdown
 sortingview
 param
 panel
+ipykernel
+jupyter_bokeh
