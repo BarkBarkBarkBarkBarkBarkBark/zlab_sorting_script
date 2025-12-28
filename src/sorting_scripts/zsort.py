@@ -275,7 +275,14 @@ def save_curated_data(patient: str, session: str, sorting_analyzer, path_dict: d
 
 
 
-def generate_figures(analyzer_obj, path_dict):
+def generate_figures(analyzer_obj, path_dict, close_figures: bool = True):
+    """
+    Generate per-unit summary figures and save them to disk.
+
+    Note: In Jupyter, matplotlib will auto-render any open figures created in a cell.
+    Setting close_figures=True prevents notebook rendering while still saving files.
+    """
+    import matplotlib.pyplot as plt
     import spikeinterface.widgets as sw
 
     fig_dir = path_dict["sorted_data"] / "figs"
@@ -295,5 +302,8 @@ def generate_figures(analyzer_obj, path_dict):
             )
 
         w.figure.savefig(
-            Path(fig_dir, f"{id}-figure")
+            Path(fig_dir, f"{id}-figure.png")
         )
+
+        if close_figures:
+            plt.close(w.figure)
