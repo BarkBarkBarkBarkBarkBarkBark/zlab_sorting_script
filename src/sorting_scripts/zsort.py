@@ -123,12 +123,12 @@ def set_probe(recording, path_dict: dict, custom_probe_name):
         print("no probe, attaching one")
     
 
-    repo_root = path_dict["repo_root"]  # <- change here
-    probe_path = (
-        repo_root
-        / "custom_probes"
-        / custom_probe_name
-    )
+    repo_root = path_dict["repo_root"]
+    # Support both historical and current folder naming.
+    probe_dir = repo_root / "Custom_Probes"
+    if not probe_dir.exists():
+        probe_dir = repo_root / "custom_probes"
+    probe_path = probe_dir / custom_probe_name
 
     probegroup = pi.read_probeinterface(probe_path)
     if len(probegroup.probes) < 1:

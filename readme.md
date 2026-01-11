@@ -5,6 +5,8 @@
 
 **Final Deliverable:** A curated analyzer saved to disk (typically clean_analyzer.zarr/) and uploaded back to storage.
 
+**Demo Data:** [can be found here](https://data.mendeley.com/datasets/w767nnk5wh/1)
+
   
 
 ### 1. Log In & Environment Setup
