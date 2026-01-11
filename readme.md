@@ -1,15 +1,70 @@
-This repo mush be run on a GPU enabled device. Our lab has an AWS machine pre-configured for use. Please open your IDE on the AWS machine using SSH
+
+**Goal:** Produce a curated SpikeInterface sorting output (clean_analyzer.zarr) from raw Intan .rhd data, using AWS compute, Kilosort4, and the SpikeInterface GUI.
+
+  
+
+**Final Deliverable:** A curated analyzer saved to disk (typically clean_analyzer.zarr/) and uploaded back to storage.
+
+**Demo Data:** [can be found here](https://data.mendeley.com/datasets/w767nnk5wh/1)
+
+  
+
+### 1. Log In & Environment Setup
+- Connect to the AWS instance via VS Code → Remote SSH.
+- Open a terminal on the remote machine.
+- Activate the sorting environment:
 
 ```
+conda deactivate
+
 conda activate sorter
 ```
 
+  
+
+### 2. Open & Run the Notebook
+
+Open the Sorting Notebook in VS Code.
+Set the dataset at the top of the notebook:
+  
 ```
-pip install requirements.txt
+patient = "raw_intan"
+
+session = "Session1"
 ```
 
-Download Intan Dataset
+The notebook will:
+- Load the Intan .rhd file
+- Attach the probe definition
+- Run Kilosort4 if needed
+- Build a SortingAnalyzer with waveforms, PCA, metrics, etc.
 
+Run cells top to bottom until both of the following exists:
+1. A Kilosort output folder (sorted/sorter_folder/)
+2. A SortingAnalyzer folder (sorted/analyzer_folder/)
+
+  
+### 3. Launch the Spike Curation GUI
+
+Once the analyzer exists, do not use Jupyter for curation.
+From the terminal in vscode, run:
+
+  
 ```
-https://data.mendeley.com/datasets/w767nnk5wh/1
+sigui --mode=web --curation "/path/to/your/codespace/data/raw_intan/Session1/sorted/analyzer_folder"
 ```
+  
+The GUI opens in your browser.
+
+### 4. Perform Curation
+
+Curation can be performed manually, just like osort. First a directory of figures could be generated, and then sifted through. 
+
+Alternatively, merge candidates can be detected based on waveform similarity and ISI, and accepted or rejected manually. 
+
+Obvious noise can be deleted, either using the GUI or in the notebook. 
+
+Units areremoved with the `analyers.remove_units()` method, and merged with the `analyzers.merge_units()` method. In both cases, the main arguments are the sorting_analyzer and a dictionary containing the units to delete or merge. 
+
+Quality metrics are generated using the method `spikeinterface.widget.plot_unit_summary()`, after calculating the needed extensions, example is in the notebook. 
+

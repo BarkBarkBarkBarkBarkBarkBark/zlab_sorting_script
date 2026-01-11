@@ -1,7 +1,10 @@
+README.md
 pyproject.toml
 src/sorting_scripts/__init__.py
 src/sorting_scripts/box_managment.py
+src/sorting_scripts/create_custom_probe.py
 src/sorting_scripts/get_file.py
+src/sorting_scripts/zsort.py
 src/sorting_scripts.egg-info/PKG-INFO
 src/sorting_scripts.egg-info/SOURCES.txt
 src/sorting_scripts.egg-info/dependency_links.txt
