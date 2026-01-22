@@ -44,9 +44,10 @@ def _resolve_data_root(repo_root: Path) -> Path:
     env = os.environ.get("SORTING_DATA_ROOT") or os.environ.get("DATA_ROOT")
     if env:
         p = Path(env).expanduser()
-        if p.exists():
-            return p.resolve()
-        raise FileNotFoundError(f"Data root from env var does not exist: {p}")
+        # In SAW we often point this at per-plugin artifacts directories which may
+        # not exist yet; create them on demand.
+        p.mkdir(parents=True, exist_ok=True)
+        return p.resolve()
 
     sibling = repo_root.parent / "data"
     if sibling.exists():
@@ -75,13 +76,28 @@ def set_paths(patient: str, session: str) -> dict:
     repo_root = _find_repo_root(here)
     data_root = _resolve_data_root(repo_root)
 
-    session_location = data_root / patient / session
+    # sorted_data = session_location / f"{patient}-{session}-sorted"
 
-    sorted_data = session_location / f"{patient}-{session}-sorted"
-    sorter_output_folder = sorted_data / f"{patient}-{session}-sorter_folder"
-    analyzer_folder = sorted_data / f"{patient}-{session}-analyzer_folder"
 
-    sorted_data.mkdir(parents=True, exist_ok=True)
+    # SAW convention: keep raw recordings and derived outputs separate.
+    #
+    # data_root/
+    #   raw/<patient>/<session>/...
+    #   sorted/<patient>/<session>/sorter_folder/...
+    #   sorted/<patient>/<session>/analyzer_folder/...
+    raw_root = data_root / "raw"
+    sorted_root = data_root / "sorted"
+
+    session_location = raw_root / patient / session
+    sorted_session = sorted_root / patient / session
+    sorter_output_folder = sorted_session / "sorter_folder"
+    analyzer_folder = sorted_session / "analyzer_folder"
+
+    # Create the raw session dir (and the parent sorted dir). We intentionally
+    # do not create sorter/analyzer folders here so the UI can use their
+    # existence as "done" indicators.
+    session_location.mkdir(parents=True, exist_ok=True)
+    sorted_session.mkdir(parents=True, exist_ok=True)
 
     intan_file = None
     try:
@@ -97,7 +113,11 @@ def set_paths(patient: str, session: str) -> dict:
         "repo_root": repo_root,
         "data_root": data_root,
         "session_location": session_location,
-        "sorted_data": sorted_data,
+        "raw_root": raw_root,
+        "sorted_root": sorted_root,
+        "sorted_session": sorted_session,
+        # Back-compat for older code paths.
+        "sorted_data": sorted_session,
         "sorter_output_folder": sorter_output_folder,
         "analyzer_folder": analyzer_folder,
         "intan_file": intan_file,  # will be None if not found

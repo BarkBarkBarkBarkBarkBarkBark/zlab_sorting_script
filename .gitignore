@@ -7,3 +7,5 @@ Data/*
 data/*
 cache_np1_binary
 cache_np1_bigchunks
+__pycache__/
+*.py[cod]
