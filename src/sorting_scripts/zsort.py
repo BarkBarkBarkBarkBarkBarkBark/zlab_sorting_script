@@ -16,6 +16,23 @@ from pathlib import Path
 import time
 
 
+def _ensure_signed_recording(recording):
+    """
+    SpikeInterface preprocessing (e.g., bandpass_filter) does not support unsigned dtypes
+    (common for Intan: uint16). Convert to signed if needed.
+    """
+    try:
+        if hasattr(recording, "get_dtype"):
+            dtype = recording.get_dtype()
+            if np.issubdtype(dtype, np.unsignedinteger):
+                print(f"[zsort] recording dtype is unsigned ({dtype}); converting to signed")
+                return si.unsigned_to_signed(recording)
+    except Exception as e:
+        # If dtype introspection fails for any reason, keep going with original recording.
+        print(f"[zsort] warning: could not inspect/convert dtype: {e}")
+    return recording
+
+
 
 def _find_repo_root(start: Path) -> Path:
     """
@@ -149,7 +166,7 @@ def set_probe(recording, path_dict: dict, custom_probe_name):
 
 
 
-def sort_stuff(recording, path_dict: dict):
+def sort(recording, path_dict: dict):
     """
     Load an existing sorting from sorter folder if present; otherwise run KS4.
     Returns a spikeinterface Sorting object.
@@ -160,14 +177,7 @@ def sort_stuff(recording, path_dict: dict):
         sorting = ss.read_sorter_folder(sorter_output_folder)
         return sorting
     except Exception:
-        # try:
-        #     if hasattr(rec, "get_dtype") and np.issubdtype(rec.get_dtype(), np.unsignedinteger):
-        #         rec = si.unsigned_to_signed(rec)
-        # except Exception:
-        #     # if spikeinterface changes behavior / dtype introspection fails, just proceed
-        #     pass
-        
-        rec = si.unsigned_to_signed(recording)
+        rec = _ensure_signed_recording(recording)
         rec = si.bandpass_filter(rec, freq_min=300, freq_max=6000)
         rec = si.center(rec)
         rec = si.whiten(rec)
@@ -182,7 +192,7 @@ def sort_stuff(recording, path_dict: dict):
         return sorting
 
 
-def analyze_stuff(recording, sorting, path_dict: dict):
+def analyze(recording, sorting, path_dict: dict):
     """
     Load a SortingAnalyzer if it exists; otherwise create + compute extensions.
     Returns a SortingAnalyzer.
@@ -196,7 +206,7 @@ def analyze_stuff(recording, sorting, path_dict: dict):
         print("No valid analyzer found, creating a new one")
         print(f"Reason: {e}")
 
-    # recording = si.unsigned_to_signed(recording)
+    recording = _ensure_signed_recording(recording)
     recording_filtered = si.bandpass_filter(recording, freq_min=300, freq_max=6000)
 
     job_kwargs = dict(n_jobs=-1, progress_bar=True, chunk_duration="1s")
