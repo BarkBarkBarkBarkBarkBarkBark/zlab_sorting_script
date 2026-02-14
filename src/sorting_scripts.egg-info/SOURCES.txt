@@ -1,4 +1,3 @@
-README.md
 pyproject.toml
 src/sorting_scripts/__init__.py
 src/sorting_scripts/box_managment.py
