@@ -1,4 +1,5 @@
 spikeinterface[full]==0.103.0
+probeinterface==0.3.2
 spikeinterface-gui==0.11.0
 kilosort==4.1.1
 sortingview
