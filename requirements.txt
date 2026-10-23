@@ -1,10 +1,5 @@
-spikeinterface[full]==0.103.0
-probeinterface==0.3.2
-spikeinterface-gui==0.11.0
-kilosort==4.1.1
-sortingview
-param
-panel
-ipykernel
-jupyter_bokeh
--e .
+# Run from the repository root: python -m pip install -r requirements.txt
+# Dependency versions live in pyproject.toml; this selects the lab workflow.
+# Python 3.10-3.12. Install a hardware-appropriate PyTorch build FIRST for CUDA.
+# See docs/environment.md for CPU-only review and optional UnitRefine setup.
+-e .[gui,notebook,sorter]

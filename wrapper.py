@@ -35,7 +35,6 @@ def main(inputs: dict, params: dict, context) -> dict:
     _ensure_src_on_path()
 
     from sorting_scripts import zsort  # noqa: WPS433
-    import spikeinterface.full as si  # noqa: WPS433
 
     patient = str((params or {}).get("patient") or "raw_intan")
     session = str((params or {}).get("session") or "Session1")
@@ -43,6 +42,8 @@ def main(inputs: dict, params: dict, context) -> dict:
     stream_id = str((params or {}).get("stream_id") or "0")
     probe_json = str((params or {}).get("probe_json") or "").strip()
     step = str((params or {}).get("step") or "sort_analyze").strip().lower()
+    if step not in {"sort", "sort_analyze", "analyze", "curate", "figures", "all"}:
+        raise ValueError(f"Unknown processing step: {step!r}")
 
     context.log(
         "info",
@@ -55,20 +56,8 @@ def main(inputs: dict, params: dict, context) -> dict:
         step=step,
     )
 
-    path_dict = zsort.set_paths(patient, session)
-
-    # Load recording
-    if recording_path:
-        rec = si.read_intan(recording_path, stream_id=stream_id)
-        path_dict["intan_file"] = recording_path
-    else:
-        intan_file = path_dict.get("intan_file")
-        if not intan_file:
-            raise FileNotFoundError(
-                "No recording_path provided and no .rhd found under "
-                f"{path_dict.get('session_location')}. Set params.recording_path."
-            )
-        rec = si.read_intan(str(intan_file), stream_id=stream_id)
+    path_dict = zsort.set_paths(patient, session, recording_path=recording_path or None)
+    rec = zsort.load_recording(path_dict, stream_id=stream_id)
 
     # Attach probe
     if probe_json:
@@ -91,16 +80,16 @@ def main(inputs: dict, params: dict, context) -> dict:
         return step in ("figures", "all")
 
     if need_sort():
-        sorting = zsort.sort_stuff(rec, path_dict)
+        sorting = zsort.sort(rec, path_dict)
     if need_analyze():
         if sorting is None:
-            sorting = zsort.sort_stuff(rec, path_dict)
-        analyzer = zsort.analyze_stuff(rec, sorting, path_dict)
+            sorting = zsort.sort(rec, path_dict)
+        analyzer = zsort.analyze(rec, sorting, path_dict)
     if need_curate():
         if analyzer is None:
             if sorting is None:
-                sorting = zsort.sort_stuff(rec, path_dict)
-            analyzer = zsort.analyze_stuff(rec, sorting, path_dict)
+                sorting = zsort.sort(rec, path_dict)
+            analyzer = zsort.analyze(rec, sorting, path_dict)
         curated = zsort.save_curated_data(patient, session, analyzer, path_dict)
     if need_figures():
         if curated is None:

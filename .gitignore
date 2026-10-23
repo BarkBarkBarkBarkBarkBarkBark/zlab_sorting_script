@@ -9,3 +9,12 @@ cache_np1_binary
 cache_np1_bigchunks
 *.pyc
 .venv
+# Local environments, builds, and notebook state
+.venv-*/
+__pycache__/
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+# Session outputs produced by zsort.set_paths
+*-sorted/

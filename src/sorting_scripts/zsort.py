@@ -1,3 +1,27 @@
+"""Sorting helpers with automatic discovery of chunked Intan recordings.
+
+Directory workflow (no notebook changes are required in this module):
+
+    paths = zsort.set_paths("/path/to/subject/session_with_rhd_files")
+    rec = zsort.load_recording(paths)
+    rec = zsort.set_probe(rec, paths, "your_probe.json")
+    sorting = zsort.sort(rec, paths)
+
+``set_paths(patient, session)`` still resolves the existing data-root layout,
+including session/raw. ``set_paths(recording_path=...)`` also accepts a file.
+Patient/session labels default to the recording directory's parent/name when
+an explicit source is given; keyword labels can override these defaults.
+
+Chunks are concatenated lazily in natural filename order into one segment.
+Raw files are never rewritten, and no merged .rhd is produced. The resulting
+sample clock starts at zero; source wall-clock timestamps are not preserved,
+and inter-file gaps are neither inferred nor filled. Use only chunks from the
+same continuous acquisition. Filenames/sample boundaries are retained in the
+recording annotations for audit. Verify Intan channel order before attaching
+a probe; discovery does not infer physical wiring. When serializing with
+``to_dict``, use ``include_annotations=True`` to retain source provenance.
+"""
+
 import json
 from pathlib import Path
 
@@ -83,30 +107,50 @@ def _resolve_data_root(repo_root: Path) -> Path:
     )
 
 
-def set_paths(patient: str, session: str) -> dict:
+def set_paths(
+    patient: str | Path | None = None,
+    session: str | None = None,
+    *,
+    recording_path: str | Path | None = None,
+) -> dict:
+    """Resolve outputs and all inputs, accepting either a directory or legacy labels.
+
+    For multiple chunks, ``intan_file`` is None rather than silently selecting
+    one file. Use ``load_recording(paths)`` for both single and chunked inputs.
+    """
     try:
         here = Path(__file__)
     except NameError:
         here = Path.cwd()
 
     repo_root = _find_repo_root(here)
-    data_root = _resolve_data_root(repo_root)
+    if recording_path is None and session is None:
+        if patient is None:
+            raise ValueError("Provide a recording path or both patient and session.")
+        recording_path = patient
+        patient = None
 
-    session_location = data_root / patient / session
+    if recording_path is not None:
+        source = Path(recording_path).expanduser().resolve()
+        intan_files = get_file.get_rhd_files(source)
+        session_location = source.parent if source.is_file() else source
+        patient = str(patient) if patient is not None else session_location.parent.name
+        session = session if session is not None else session_location.name
+        data_root = session_location.parent.parent
+    else:
+        if patient is None or session is None:
+            raise ValueError("Both patient and session are required without a recording path.")
+        patient = str(patient)
+        data_root = _resolve_data_root(repo_root)
+        session_location = data_root / patient / session
+        source = session_location
+        intan_files = get_file.get_rhd_files(source)
 
     sorted_data = session_location / f"{patient}-{session}-sorted"
     sorter_output_folder = sorted_data / f"{patient}-{session}-sorter_folder"
     analyzer_folder = sorted_data / f"{patient}-{session}-analyzer_folder"
 
     sorted_data.mkdir(parents=True, exist_ok=True)
-
-    intan_file = None
-    try:
-        intan_file = get_file.get_rhd_file(session_location)
-    except FileNotFoundError:
-        print(f"[set_paths] No .rhd found under: {session_location}")
-    except Exception as e:
-        print(f"[set_paths] Could not resolve .rhd under {session_location}: {e}")
 
     return {
         "patient": patient,
@@ -117,8 +161,66 @@ def set_paths(patient: str, session: str) -> dict:
         "sorted_data": sorted_data,
         "sorter_output_folder": sorter_output_folder,
         "analyzer_folder": analyzer_folder,
-        "intan_file": intan_file,  # will be None if not found
+        "recording_source": source,
+        "intan_files": intan_files,
+        "intan_file": intan_files[0] if len(intan_files) == 1 else None,
     }
+
+
+def load_recording(source: str | Path | dict, *, stream_id: str = "0"):
+    """Read amplifier chunks as one lazy recording, with exact compatibility checks.
+
+    Accept a directory, file, or the dictionary returned by ``set_paths``.
+    Stream 0 is Intan's amplifier stream; pass another stream explicitly if needed.
+    Missing/invalid inputs and extractor integrity errors propagate to the caller.
+    """
+    if isinstance(source, dict):
+        source = source["recording_source"]
+    files = get_file.get_rhd_files(source)
+    recordings = []
+    sample_counts = []
+    for path in files:
+        recording = si.read_intan(path, stream_id=stream_id)
+        if recording.get_num_segments() != 1:
+            raise ValueError(f"Expected one segment in RHD chunk: {path}")
+        count = recording.get_num_samples()
+        if count == 0:
+            raise ValueError(f"RHD chunk has no samples: {path}")
+        if recordings:
+            reference = recordings[0]
+            if recording.get_sampling_frequency() != reference.get_sampling_frequency():
+                raise ValueError(f"Sampling frequency differs from {files[0]}: {path}")
+            if not np.array_equal(recording.channel_ids, reference.channel_ids):
+                raise ValueError(f"Channel IDs/order differ from {files[0]}: {path}")
+            if recording.get_dtype() != reference.get_dtype():
+                raise ValueError(f"Recording dtype differs from {files[0]}: {path}")
+            for property_name in ("gain_to_uV", "offset_to_uV"):
+                actual = recording.get_property(property_name)
+                expected = reference.get_property(property_name)
+                if not np.array_equal(actual, expected):
+                    raise ValueError(f"{property_name} differs from {files[0]}: {path}")
+        recordings.append(recording)
+        sample_counts.append(count)
+
+    recording = (
+        recordings[0] if len(recordings) == 1
+        else si.concatenate_recordings(recordings, ignore_times=True)
+    )
+    recording.annotate(
+        intan_source_files=[str(path) for path in files],
+        intan_source_sample_counts=sample_counts,
+        intan_source_start_samples=np.cumsum([0, *sample_counts[:-1]]).tolist(),
+        intan_concatenation_note=(
+            "Natural filename order; consecutive sample clock; "
+            "inter-file gaps are not inferred or filled."
+        ),
+    )
+    print(
+        f"[zsort] Loaded {len(files)} RHD file(s): {recording.get_num_channels()} channels, "
+        f"{recording.get_sampling_frequency():g} Hz, {sum(sample_counts)} samples, "
+        f"{sum(sample_counts) / recording.get_sampling_frequency():.3f} seconds."
+    )
+    return recording
 
 
 
@@ -166,30 +268,51 @@ def set_probe(recording, path_dict: dict, custom_probe_name):
 
 
 
-def sort(recording, path_dict: dict):
+def sort(recording, path_dict: dict, *, checkpoint: bool = True,
+         batch_size: int = 60000, clear_cache: bool = False):
     """
-    Load an existing sorting from sorter folder if present; otherwise run KS4.
-    Returns a spikeinterface Sorting object.
+    Reuse a readable sorting, or start KS4 in a new destination.
+
+    Existing unreadable/failed folders are never replaced. By default save a
+    pre-clustering checkpoint and retain recording.dat for recovery/inspection.
+    See docs/sorting_recovery.md for the scoped Kilosort 4.1.1 guard and resume.
+    For CUDA memory errors, try batch_size=15000 and clear_cache=True in a
+    new output folder. Batch size is in samples; smaller batches can change
+    drift estimation and sorting results. Cache clearing can slow sorting.
     """
-    sorter_output_folder = path_dict["sorter_output_folder"]
+    if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer number of samples")
+    if not isinstance(clear_cache, bool):
+        raise ValueError("clear_cache must be a bool")
+    sorter_output_folder = Path(path_dict["sorter_output_folder"])
+    if sorter_output_folder.exists():
+        try:
+            return ss.read_sorter_folder(sorter_output_folder)
+        except Exception as error:
+            raise RuntimeError(
+                f"Existing sorter output could not be loaded; preserved: {sorter_output_folder}. "
+                "Inspect its log or resume a checkpoint. For a full rerun choose a NEW "
+                "path_dict['sorter_output_folder']; no output was deleted."
+            ) from error
 
-    try:
-        sorting = ss.read_sorter_folder(sorter_output_folder)
-        return sorting
-    except Exception:
-        rec = _ensure_signed_recording(recording)
-        rec = si.bandpass_filter(rec, freq_min=300, freq_max=6000)
-        rec = si.center(rec)
-        rec = si.whiten(rec)
+    from .kilosort_runtime import kilosort_runtime
 
-        sorting = run_sorter(
+    rec = _ensure_signed_recording(recording)
+    rec = si.bandpass_filter(rec, freq_min=300, freq_max=6000)
+    rec = si.center(rec)
+    rec = si.whiten(rec)
+    checkpoint_path = sorter_output_folder / "precluster_checkpoint.pt" if checkpoint else None
+    with kilosort_runtime(checkpoint_path):
+        return run_sorter(
             sorter_name="kilosort4",
             recording=rec,
             folder=sorter_output_folder,
-            remove_existing_folder=True,
+            remove_existing_folder=False,
+            delete_recording_dat=not checkpoint,
+            batch_size=int(batch_size),
+            clear_cache=clear_cache,
             verbose=True,
         )
-        return sorting
 
 
 def analyze(recording, sorting, path_dict: dict):
@@ -197,14 +320,15 @@ def analyze(recording, sorting, path_dict: dict):
     Load a SortingAnalyzer if it exists; otherwise create + compute extensions.
     Returns a SortingAnalyzer.
     """
-    analyzer_folder = path_dict["analyzer_folder"]
-
-    try:
-        sorting_analyzer = si.load_sorting_analyzer(analyzer_folder)
-        return sorting_analyzer
-    except Exception as e:
-        print("No valid analyzer found, creating a new one")
-        print(f"Reason: {e}")
+    analyzer_folder = Path(path_dict["analyzer_folder"])
+    if analyzer_folder.exists():
+        try:
+            return si.load_sorting_analyzer(analyzer_folder)
+        except Exception as error:
+            raise RuntimeError(
+                f"Existing analyzer could not be loaded; preserved: {analyzer_folder}. "
+                "Inspect it or choose a NEW path_dict['analyzer_folder']."
+            ) from error
 
     recording = _ensure_signed_recording(recording)
     recording_filtered = si.bandpass_filter(recording, freq_min=300, freq_max=6000)
@@ -215,7 +339,7 @@ def analyze(recording, sorting, path_dict: dict):
         sorting=sorting,  # IMPORTANT: pass the Sorting object, not the folder path
         recording=recording_filtered,
         folder=analyzer_folder,
-        overwrite=True,
+        overwrite=False,
         format="binary_folder",
         **job_kwargs,
     )
@@ -242,6 +366,30 @@ def analyze(recording, sorting, path_dict: dict):
     )
 
     return sorting_analyzer
+
+
+def launch_curation_gui(analyzer, *, mode: str = "web", curation: bool = True, **kwargs):
+    """Launch the GUI, avoiding its Param class-docstring failure in IPython.
+
+    Only automatic documentation generation is disabled during the web utility
+    import. Param's original setting is restored even if that import fails.
+    All other options are forwarded unchanged to ``run_mainwindow``.
+    """
+    if mode == "web":
+        from importlib import import_module
+        import param.parameterized as parameterized
+
+        previous = parameterized.docstring_describe_params
+        try:
+            # SelectableTabulator overrides .param with an instance-only property.
+            parameterized.docstring_describe_params = False
+            import_module("spikeinterface_gui.utils_panel")
+        finally:
+            parameterized.docstring_describe_params = previous
+
+    from spikeinterface_gui import run_mainwindow
+
+    return run_mainwindow(analyzer=analyzer, mode=mode, curation=curation, **kwargs)
 
 
 def save_curated_data(patient: str, session: str, sorting_analyzer, path_dict: dict):
