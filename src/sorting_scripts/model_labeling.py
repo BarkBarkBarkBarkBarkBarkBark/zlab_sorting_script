@@ -92,6 +92,22 @@ def _load_classifier(repo_id, revision, trust_model):
     return model, info, provenance
 
 
+def _preload_classifiers(config):
+    """Check every enabled model before cleanup, including conditional SUA use."""
+    validate_model_config(config)
+    loaded = {}
+    if not config.enable_model_labeling:
+        return loaded
+    for name, enabled in (("noise", config.enable_noise_classifier), ("sua_mua", config.enable_sua_classifier)):
+        if not enabled:
+            continue
+        try:
+            loaded[name] = _load_classifier(config.models[name], config.model_revisions.get(name), config.model_trust)
+        except Exception as error:
+            raise RuntimeError(f"UnitRefine {name} preflight failed: {error}") from error
+    return loaded
+
+
 def _metric_frame(analyzer):
     frames = [analyzer.get_extension(name).get_data() for name in ("quality_metrics", "template_metrics")
               if analyzer.get_extension(name) is not None]
@@ -187,7 +203,7 @@ def _predict(analyzer, model, info, config):
     return predictions
 
 
-def label_final_units(analyzer, config, output_folder):
+def label_final_units(analyzer, config, output_folder, *, loaded_models=None):
     """Label post-merge units without changing the analyzer or human properties.
 
     Legacy SI writes shared properties; each pass therefore runs on its own
@@ -225,7 +241,11 @@ def label_final_units(analyzer, config, output_folder):
                                             "not_evaluated_units": len(table)}
                 continue
             repo_id = config.models[name]
-            model, info, provenance = _load_classifier(repo_id, config.model_revisions.get(name), config.model_trust)
+            model, info, provenance = (
+                loaded_models[name] if loaded_models is not None else
+                _load_classifier(repo_id, config.model_revisions.get(name), config.model_trust)
+            )
+            provenance = dict(provenance)
             metadata["models"][name] = provenance
             selected = analyzer.select_units(analyzer.unit_ids)
             required = list(model.feature_names_in_)

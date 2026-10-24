@@ -368,7 +368,7 @@ def analyze(recording, sorting, path_dict: dict):
     return sorting_analyzer
 
 
-def launch_curation_gui(analyzer, *, mode: str = "web", curation: bool = True, **kwargs):
+def launch_curation_gui(analyzer, *, mode: str = "desktop", curation: bool = True, **kwargs):
     """Launch the GUI, avoiding its Param class-docstring failure in IPython.
 
     Only automatic documentation generation is disabled during the web utility

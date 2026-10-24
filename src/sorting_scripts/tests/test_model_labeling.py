@@ -100,7 +100,7 @@ class ModelLabelingTests(unittest.TestCase):
     def test_all_noise_skips_sua_and_keeps_all(self):
         self.all_noise = True
         result, loader = self.run_pipeline()
-        self.assertEqual(loader.call_count, 1)
+        self.assertEqual(loader.call_count, 2)  # Both checked before processing; SUA inference skipped.
         self.assertEqual(result.analyzer.get_num_units(), 3)
         self.assertTrue(result.ml_classifications["sua_mua_status"].eq("not_evaluated").all())
 
@@ -124,12 +124,39 @@ class ModelLabelingTests(unittest.TestCase):
         np.testing.assert_array_equal(result.analyzer.unit_ids, ["1"])
 
     def test_loading_failure_is_reported_and_raised(self):
-        with patch.object(model_labeling, "_load_classifier", side_effect=OSError("network/cache unavailable")):
-            with self.assertRaisesRegex(RuntimeError, "noise labeling failed.*network/cache"):
+        with patch.object(model_labeling, "_load_classifier", side_effect=OSError("network/cache unavailable")), \
+             patch.object(auto_curate, "_compute_metrics") as compute, \
+             patch.object(auto_curate.curation, "remove_duplicated_spikes") as cleanup:
+            with self.assertRaisesRegex(RuntimeError, "noise preflight failed.*network/cache"):
                 auto_curate.AutoCurator(self.config).run(self.analyzer, self.root / "run")
-        metadata = json.loads((self.root / "run/model_curation_metadata.json").read_text())
-        self.assertEqual(len(metadata["failures"]), 1)
-        self.assertFalse((self.root / "run/analyzer").exists())
+        compute.assert_not_called()
+        cleanup.assert_not_called()
+        self.assertFalse((self.root / "run").exists())
+
+    def test_one_line_preflight_checks_both_models_without_metrics(self):
+        with patch.object(model_labeling, "_load_classifier", side_effect=self.load) as loader, \
+             patch.object(auto_curate, "_compute_metrics") as compute:
+            result = auto_curate.preflight(self.config)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(set(result["models"]), {"noise", "sua_mua"})
+        self.assertEqual(loader.call_count, 2)
+        compute.assert_not_called()
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_preflight_disabled_models_does_not_load(self):
+        self.config.enable_model_labeling = False
+        with patch.object(model_labeling, "_load_classifier") as loader:
+            self.assertEqual(auto_curate.preflight(self.config), {"status": "passed", "models": {}})
+        loader.assert_not_called()
+
+    def test_sua_preflight_failure_also_precedes_processing(self):
+        with patch.object(model_labeling, "_load_classifier", side_effect=[self.load("noise_neural", None, True),
+                                                                                 RuntimeError("sklearn mismatch")]), \
+             patch.object(auto_curate, "_compute_metrics") as compute:
+            with self.assertRaisesRegex(RuntimeError, "sua_mua preflight failed.*sklearn mismatch"):
+                auto_curate.AutoCurator(self.config).run(self.analyzer, self.root / "run")
+        compute.assert_not_called()
+        self.assertFalse((self.root / "run").exists())
 
     def test_post_merge_units_are_reclassified(self):
         self.config.auto_merge = True

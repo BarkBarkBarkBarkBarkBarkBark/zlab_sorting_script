@@ -2,4 +2,6 @@
 # Dependency versions live in pyproject.toml; this selects the lab workflow.
 # Python 3.10-3.12. Install a hardware-appropriate PyTorch build FIRST for CUDA.
 # See docs/environment.md for CPU-only review and optional UnitRefine setup.
+scikit-learn==1.4.2 
+numpy>=1.26,<2
 -e .[gui,notebook,sorter]

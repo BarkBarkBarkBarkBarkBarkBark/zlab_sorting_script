@@ -274,6 +274,21 @@ def _json_default(value):
     raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
+def preflight(config: AutoCurationConfig | None = None) -> dict:
+    """Validate config and load enabled models without processing recordings.
+
+    May download uncached models and deserialize trusted artifacts according to
+    config.model_trust. Checks access, declared sklearn compatibility, loading,
+    and feature metadata; does not compute metrics or run recording inference.
+    """
+    from .model_labeling import _preload_classifiers
+
+    config = config if config is not None else AutoCurationConfig()
+    _validate_config(config)
+    loaded = _preload_classifiers(config)
+    return {"status": "passed", "models": {name: item[2] for name, item in loaded.items()}}
+
+
 class AutoCurator:
     """Run cleanup, redundancy removal, hard merges, then final unit labeling.
 
@@ -292,7 +307,12 @@ class AutoCurator:
         if not analyzer.has_recording():
             raise ValueError("Automatic curation requires the analyzer's original recording.")
         output_folder = Path(output_folder).expanduser().resolve()
+        if output_folder.exists():
+            raise FileExistsError(f"Output folder already exists: {output_folder}")
         config_json = json.dumps(asdict(config), default=_json_default, allow_nan=False, indent=2)
+        from .model_labeling import _preload_classifiers
+
+        loaded_models = _preload_classifiers(config) if analyzer.get_num_units() else {}
         output_folder.mkdir(parents=True, exist_ok=False)
         (output_folder / "config.json").write_text(config_json + "\n")
         original_ids = list(analyzer.unit_ids)
@@ -352,7 +372,9 @@ class AutoCurator:
         )
         from .model_labeling import label_final_units, persist_model_labels
 
-        ml_classifications, model_metadata = label_final_units(working, config, output_folder)
+        ml_classifications, model_metadata = label_final_units(
+            working, config, output_folder, loaded_models=loaded_models,
+        )
         keep_mask = labels["label"].isin(config.keep_labels) if config.apply_quality_filtering else pd.Series(
             True, index=working.unit_ids,
         )

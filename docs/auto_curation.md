@@ -105,7 +105,9 @@ environment or replace installed packages.
 `enable_model_labeling=True` runs the noise/neural classifier on all post-cleanup,
 post-merge candidates, then SUA/MUA only on noise-predicted neural units. If the
 noise classifier is explicitly disabled, SUA/MUA evaluates all candidates. Empty
-populations do not load a model. Non-evaluated predictions are blank, with NaN
+input populations skip model loading. For nonempty inputs, both enabled models
+are loaded before cleanup, even if no units eventually need SUA inference.
+Non-evaluated predictions are blank, with NaN
 confidence and `not_evaluated` status. Neither model overwrites human labels.
 
 Defaults use `SpikeInterface/UnitRefine_noise_neural_classifier` and
@@ -116,12 +118,32 @@ SI's supported loader. Actual snapshot commits and artifact SHA-256 are recorded
 `model_trust=True` permits model deserialization: only use repositories you trust.
 No arbitrary classifier or custom sklearn inference replaces the SI implementation.
 
+Run this one line after configuring `curation_config`, before starting sorting,
+analysis, or curation:
+
+```python
+auto_curate.preflight(curation_config)
+```
+
+It returns `{"status": "passed", "models": ...}` or raises immediately. It
+validates configuration and loads every enabled classifier, checking model access,
+declared sklearn compatibility, deserialization, and required-feature metadata.
+Uncached models may be downloaded; the configured trust policy applies. It does
+not process recordings, compute metrics, or prove inference on your data will
+succeed. Disabled model labeling performs only configuration checks.
+
+`AutoCurator.run()` also performs this check automatically before creating output
+folders, cleanup, or metric computation, and reuses the loaded models for final
+inference. Standalone preflight does not retain loaded models between calls.
+Restart the notebook kernel or reload the updated modules before using this API.
+
 **Current environment blocker (verified October 23, 2026):** both published
 artifacts require scikit-learn **1.4.2**, while this repository's environment has
 **1.9.0**. Actual inference was attempted and failed in `SimpleImputer` with a
 missing `_fill_dtype` attribute. The implementation now detects the version
-mismatch **before deserializing or computing expensive model metrics**, raises
-an actionable error, and writes failure metadata. It does not patch serialized
+mismatch **before deserializing or starting curation**, and raises an actionable
+error without creating a curation folder. Later inference failures still write
+failure metadata. It does not patch serialized
 estimators or change installed packages. Use a separate environment with the
 model's declared sklearn version and compatible NumPy/SciPy; verify its complete
 dependency resolution before running the notebook. Do not blindly downgrade the

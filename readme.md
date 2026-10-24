@@ -83,14 +83,14 @@ It is intended for this manual workflow, not for arbitrary automated analyzers.
 
 ### Outputs and reruns
 
-For subject `mouse1`, session `run1`, outputs are inside
-`<session>/mouse1-run1-sorted/`:
+For subject `patient1`, session `run1`, outputs are inside
+`<session>/patient1-run1-sorted/`:
 
 | Output | Purpose |
 | --- | --- |
-| `mouse1-run1-sorter_folder/` | Kilosort4 sorting and sorter logs |
-| `mouse1-run1-analyzer_folder/` | Binary-folder analyzer and GUI decisions |
-| `mouse1-run1-curated_analyzer.zarr/` | Applied manual curation; later saves use `-v2`, `-v3`, … |
+| `patient1-run1-sorter_folder/` | Kilosort4 sorting and sorter logs |
+| `patient1-run1-analyzer_folder/` | Binary-folder analyzer and GUI decisions |
+| `patient1-run1-curated_analyzer.zarr/` | Applied manual curation; later saves use `-v2`, `-v3`, … |
 | `figs/` | Per-unit PNG summaries; matching filenames are replaced on rerun |
 | `auto_curated_<timestamp>_<suffix>/` | Separate optional automated run and audit tables |
 
@@ -110,6 +110,11 @@ provides an explicit smaller-batch retry; use new output folders as described
 in that guide. Defaults remain 60000 samples and no forced cache clearing.
 
 ## Optional automated curation
+
+Before expensive processing, check the configured classifiers with
+`auto_curate.preflight(curation_config)`. This loads enabled models and catches
+access/version/loading errors without computing recording metrics. Curation also
+runs this check automatically before cleanup; see the guide below for its scope.
 
 Use [the automated notebook](notebooks/z-sort_notebook_w_auto_curate.ipynb) and
 [the curation guide](docs/auto_curation.md). Defaults remove duplicate spikes,
